@@ -28,6 +28,7 @@ logs
 .eslintcache
 
 # User-generated data
+paywall-sites.js
 user-sites.json
 
 # Docker
