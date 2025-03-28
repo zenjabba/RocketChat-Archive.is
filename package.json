@@ -1,0 +1,25 @@
+{
+  "name": "rocketchat-paywall-bot",
+  "version": "1.0.0",
+  "description": "A RocketChat bot that detects paywall links and provides archive.is alternatives",
+  "main": "paywallbot.js",
+  "scripts": {
+    "start": "node paywallbot.js",
+    "dev": "nodemon paywallbot.js"
+  },
+  "keywords": [
+    "rocketchat",
+    "bot",
+    "paywall",
+    "archive"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@rocket.chat/sdk": "^0.2.9",
+    "dotenv": "^16.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+} 
