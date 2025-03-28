@@ -121,6 +121,22 @@ function removePaywallSite(domain) {
   }
 }
 
+// Add this helper function to send DM responses
+async function sendDirectToUser(username, message) {
+  try {
+    await driver.sendDirectToUser(message, username);
+    console.log(`Sent DM to ${username}`);
+  } catch (error) {
+    console.error(`Failed to send DM to ${username}:`, error);
+    // Fallback to channel if DM fails
+    try {
+      await driver.sendToRoom(`@${username} I tried to DM you but couldn't. Please check your DM settings.`, message.rid);
+    } catch (secondError) {
+      console.error('Failed to send fallback message:', secondError);
+    }
+  }
+}
+
 // Modify the processMessages function
 async function processMessages(err, message, messageOptions) {
   if (err) {
@@ -156,7 +172,7 @@ async function processMessages(err, message, messageOptions) {
     // Extract domain from command
     const parts = message.msg.split(' ');
     if (parts.length < 2) {
-      await driver.sendToRoom('Usage: !addsite domain.com', message.rid);
+      await sendDirectToUser(message.u.username, 'Usage: !addsite domain.com');
       return;
     }
     
@@ -169,13 +185,17 @@ async function processMessages(err, message, messageOptions) {
         domain = new URL(domain).hostname;
       }
     } catch (e) {
-      // If URL parsing fails, just use the raw input
       console.error(`Error parsing domain URL: ${domain}`, e);
     }
     
     // Add the site
     const result = addPaywallSite(domain);
-    await driver.sendToRoom(result.message, message.rid);
+    
+    // Send response via DM
+    await sendDirectToUser(message.u.username, result.message);
+    
+    // Optionally, acknowledge in the channel with a brief message
+    await driver.sendToRoom(`@${message.u.username} I've sent you a DM with the result.`, message.rid);
     return;
   }
 
@@ -184,7 +204,7 @@ async function processMessages(err, message, messageOptions) {
     // Extract domain from command
     const parts = message.msg.split(' ');
     if (parts.length < 2) {
-      await driver.sendToRoom('Usage: !removesite domain.com', message.rid);
+      await sendDirectToUser(message.u.username, 'Usage: !removesite domain.com');
       return;
     }
     
@@ -197,13 +217,17 @@ async function processMessages(err, message, messageOptions) {
         domain = new URL(domain).hostname;
       }
     } catch (e) {
-      // If URL parsing fails, just use the raw input
       console.error(`Error parsing domain URL: ${domain}`, e);
     }
     
     // Remove the site
     const result = removePaywallSite(domain);
-    await driver.sendToRoom(result.message, message.rid);
+    
+    // Send response via DM
+    await sendDirectToUser(message.u.username, result.message);
+    
+    // Optionally, acknowledge in the channel with a brief message
+    await driver.sendToRoom(`@${message.u.username} I've sent you a DM with the result.`, message.rid);
     return;
   }
 
@@ -212,7 +236,12 @@ async function processMessages(err, message, messageOptions) {
     // Create a formatted list of paywall domains
     const sortedDomains = [...PAYWALL_DOMAINS].sort();
     const domainList = sortedDomains.join('\n- ');
-    await driver.sendToRoom(`Current paywall sites:\n- ${domainList}`, message.rid);
+    
+    // Send the list via DM
+    await sendDirectToUser(message.u.username, `Current paywall sites:\n- ${domainList}`);
+    
+    // Optionally, acknowledge in the channel
+    await driver.sendToRoom(`@${message.u.username} I've sent you the paywall sites list via DM.`, message.rid);
     return;
   }
 
