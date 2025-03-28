@@ -74,16 +74,6 @@ docker push yourusername/rocketchat-paywall-bot:latest
 
 You can run the bot using a simple Docker command:
 
-```bash
-docker run -d \
-  -e ROCKETCHAT_URL=your-rocketchat-server.com \
-  -e ROCKETCHAT_USER=paywall-bot \
-  -e ROCKETCHAT_PASSWORD=your-actual-password \
-  -e ROCKETCHAT_USE_SSL=true \
-  -e ROCKETCHAT_ROOMS=politics,news \
-  --name paywall-bot \
-  yourusername/rocketchat-paywall-bot:latest
-```
 
 ### Running with Docker Compose (Recommended for Production)
 
@@ -93,32 +83,7 @@ For better security, use Docker Compose with secrets to manage the bot password:
 ```bash
 echo "your-secure-password" > rocketchat_password.secret
 ```
-
-2. Create a `docker-compose.yml` file:
-```yaml
-version: '3.8'
-services:
-  paywall-bot:
-    image: yourusername/rocketchat-paywall-bot:latest
-    container_name: paywall-bot
-    environment:
-      - ROCKETCHAT_URL=your-rocketchat-server.com
-      - ROCKETCHAT_USER=paywall-bot
-      - ROCKETCHAT_USE_SSL=true
-      - ROCKETCHAT_ROOMS=politics,news
-    secrets:
-      - rocketchat_password
-    restart: unless-stopped
-    volumes:
-      - ./paywall-sites.js:/usr/src/app/paywall-sites.js
-    command: /bin/sh -c "export ROCKETCHAT_PASSWORD=$$(cat /run/secrets/rocketchat_password) && node paywallbot.js"
-
-secrets:
-  rocketchat_password:
-    file: ./rocketchat_password.secret
-```
-
-3. Start the container:
+2. Start the container:
 ```bash
 docker-compose up -d
 ```
