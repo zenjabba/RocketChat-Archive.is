@@ -5,22 +5,8 @@ const path = require('path');
 let PAYWALL_DOMAINS = require('./paywall-sites');
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 
-// Path for storing user-added sites
-const USER_SITES_FILE = path.join(__dirname, 'user-sites.json');
-
 // Add this near the top of your file with other constants
 const PROCESSED_MESSAGE_IDS = new Set();
-
-// Load user-added sites if the file exists
-try {
-  if (fs.existsSync(USER_SITES_FILE)) {
-    const userSites = JSON.parse(fs.readFileSync(USER_SITES_FILE, 'utf8'));
-    PAYWALL_DOMAINS = [...PAYWALL_DOMAINS, ...userSites];
-    console.log(`Loaded ${userSites.length} user-added paywall sites`);
-  }
-} catch (error) {
-  console.error('Error loading user-added sites:', error);
-}
 
 // Configuration from environment variables
 const HOST = process.env.ROCKETCHAT_URL ? process.env.ROCKETCHAT_URL.replace(/\/+$/, '') : '';
@@ -237,11 +223,9 @@ async function processMessages(err, message, messageOptions) {
     const sortedDomains = [...PAYWALL_DOMAINS].sort();
     const domainList = sortedDomains.join('\n- ');
     
-    // Send the list via DM
+    // Send the list via DM only
     await sendDirectToUser(message.u.username, `Current paywall sites:\n- ${domainList}`);
     
-    // Optionally, acknowledge in the channel
-    await driver.sendToRoom(`@${message.u.username} I've sent you the paywall sites list via DM.`, message.rid);
     return;
   }
 
