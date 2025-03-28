@@ -191,11 +191,11 @@ async function processMessages(err, message, messageOptions) {
     // Add the site
     const result = addPaywallSite(domain);
     
-    // Send response via DM
+    // Send detailed response via DM
     await sendDirectToUser(message.u.username, result.message);
     
-    // Optionally, acknowledge in the channel with a brief message
-    await driver.sendToRoom(`@${message.u.username} I've sent you a DM with the result.`, message.rid);
+    // Also post the actual result in the channel (not just acknowledgment)
+    await driver.sendToRoom(`${result.message} (requested by @${message.u.username})`, message.rid);
     return;
   }
 
@@ -223,11 +223,11 @@ async function processMessages(err, message, messageOptions) {
     // Remove the site
     const result = removePaywallSite(domain);
     
-    // Send response via DM
+    // Send detailed response via DM
     await sendDirectToUser(message.u.username, result.message);
     
-    // Optionally, acknowledge in the channel with a brief message
-    await driver.sendToRoom(`@${message.u.username} I've sent you a DM with the result.`, message.rid);
+    // Also post the actual result in the channel
+    await driver.sendToRoom(`${result.message} (requested by @${message.u.username})`, message.rid);
     return;
   }
 
