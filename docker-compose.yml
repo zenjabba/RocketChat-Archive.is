@@ -2,6 +2,11 @@ services:
   paywall-bot:
     image: zenjabba/rocketchat-paywall-bot:latest
     container_name: paywall-bot
+    environment:
+      - ROCKETCHAT_URL=https://rocketchat.zenteprise.org
+      - ROCKETCHAT_USER=paywall-bot
+      - ROCKETCHAT_USE_SSL=true
+      - ROCKETCHAT_ROOMS=chatgpt,politics
     secrets:
       - rocketchat_password
     restart: unless-stopped
