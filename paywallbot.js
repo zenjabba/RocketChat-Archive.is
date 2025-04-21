@@ -66,7 +66,7 @@ function isPaywallSite(url) {
   }
 }
 
-// Function to convert URL to archive.is or xcancel.com URL
+// Function to convert URL to archive.is or nitter.poast.org URL
 function getArchiveUrl(url) {
   try {
     // Parse the URL
@@ -75,7 +75,8 @@ function getArchiveUrl(url) {
 
     // Special handling for x.com and twitter.com
     if (domain === 'x.com' || domain === 'twitter.com') {
-      return `https://xcancel.com/${url.replace(/^https?:\/\//, '')}`;
+      // Replace the domain with nitter.poast.org but keep the rest of the path
+      return url.replace(/^https?:\/\/(www\.)?(x\.com|twitter\.com)/, 'https://nitter.poast.org');
     }
 
     // Default handling for other sites using archive.is
