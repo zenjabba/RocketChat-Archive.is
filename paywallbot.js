@@ -66,12 +66,19 @@ function isPaywallSite(url) {
   }
 }
 
-// Function to convert URL to archive.is URL
+// Function to convert URL to archive.is or xcancel.com URL
 function getArchiveUrl(url) {
   try {
     // Parse the URL
     const parsedUrl = new URL(url);
-    // Remove the protocol (http:// or https://) and return formatted archive URL
+    const domain = parsedUrl.hostname.replace('www.', '');
+
+    // Special handling for x.com and twitter.com
+    if (domain === 'x.com' || domain === 'twitter.com') {
+      return `https://xcancel.com/${url.replace(/^https?:\/\//, '')}`;
+    }
+
+    // Default handling for other sites using archive.is
     return `https://archive.is/${url.replace(/^https?:\/\//, '')}`;
   } catch (e) {
     console.error(`Error parsing URL for archive: ${url}`, e);
