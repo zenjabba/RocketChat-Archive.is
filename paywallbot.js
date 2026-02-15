@@ -2,10 +2,61 @@ require('dotenv').config();
 const { driver } = require('@rocket.chat/sdk');
 const fs = require('fs');
 const path = require('path');
-let PAYWALL_DOMAINS = require('./paywall-sites');
+
+const BUILTIN_DOMAINS = require('./paywall-sites');
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 
-// Add this near the top of your file with other constants
+// Persistent user-sites storage
+const USER_SITES_PATH = path.join(__dirname, 'data', 'user-sites.json');
+
+// In-memory state
+let USER_SITES = { added: [], removed: [] };
+let PAYWALL_DOMAINS = [];
+
+// Load user-sites.json from the data volume and merge with built-in list
+function loadUserSites() {
+  try {
+    const dir = path.dirname(USER_SITES_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    if (fs.existsSync(USER_SITES_PATH)) {
+      const raw = fs.readFileSync(USER_SITES_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      USER_SITES.added = Array.isArray(parsed.added) ? parsed.added : [];
+      USER_SITES.removed = Array.isArray(parsed.removed) ? parsed.removed : [];
+    }
+  } catch (error) {
+    console.error('Error loading user-sites.json, using defaults:', error.message);
+  }
+  rebuildDomainList();
+}
+
+function rebuildDomainList() {
+  const combined = new Set([...BUILTIN_DOMAINS, ...USER_SITES.added]);
+  for (const domain of USER_SITES.removed) {
+    combined.delete(domain);
+  }
+  PAYWALL_DOMAINS = [...combined];
+}
+
+function saveUserSites() {
+  try {
+    const dir = path.dirname(USER_SITES_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(USER_SITES_PATH, JSON.stringify(USER_SITES, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Error saving user-sites.json:', error.message);
+    throw error;
+  }
+}
+
+// Initialize on startup
+loadUserSites();
+console.log(`Loaded ${PAYWALL_DOMAINS.length} paywall domains (${BUILTIN_DOMAINS.length} built-in, ${USER_SITES.added.length} user-added, ${USER_SITES.removed.length} user-removed)`);
+
 const PROCESSED_MESSAGE_IDS = new Set();
 
 // Configuration from environment variables
@@ -15,12 +66,11 @@ const PASS = process.env.ROCKETCHAT_PASSWORD;
 const SSL = process.env.ROCKETCHAT_USE_SSL === 'true';
 const ROOMS = process.env.ROCKETCHAT_ROOMS ? process.env.ROCKETCHAT_ROOMS.split(',') : [];
 
-// Connection options with increased timeout
 const CONNECTION_OPTIONS = {
   host: HOST,
   useSsl: SSL,
-  timeout: 40000, // Increase timeout to 40 seconds
-  rejectUnauthorized: false // Allow self-signed certificates
+  timeout: 40000,
+  rejectUnauthorized: false
 };
 
 console.log('Connection configuration:', {
@@ -31,31 +81,68 @@ console.log('Connection configuration:', {
   originalUrl: process.env.ROCKETCHAT_URL
 });
 
-// Function to add a new paywall site
 function addPaywallSite(domain) {
-  // Normalize domain (remove www. prefix if present)
   domain = domain.toLowerCase().replace(/^www\./, '');
-  
-  // Check if domain is already in the list
+
+  // If it was previously removed, un-remove it
+  if (USER_SITES.removed.includes(domain)) {
+    USER_SITES.removed = USER_SITES.removed.filter(d => d !== domain);
+    try {
+      saveUserSites();
+      rebuildDomainList();
+      return { success: true, message: `Re-enabled built-in domain ${domain}.` };
+    } catch {
+      return { success: false, message: `Failed to save changes for ${domain}.` };
+    }
+  }
+
   if (PAYWALL_DOMAINS.includes(domain)) {
     return { success: false, message: `Domain ${domain} is already in the paywall list.` };
   }
-  
-  // Add to the in-memory list
-  PAYWALL_DOMAINS.push(domain);
-  
-  // Write the entire list back to paywall-sites.js
+
+  USER_SITES.added.push(domain);
   try {
-    const fileContent = `// List of known paywall domains\nmodule.exports = [\n  '${PAYWALL_DOMAINS.sort().join("',\n  '")}'  \n];\n`;
-    fs.writeFileSync(path.join(__dirname, 'paywall-sites.js'), fileContent, 'utf8');
+    saveUserSites();
+    rebuildDomainList();
     return { success: true, message: `Added ${domain} to the paywall list.` };
-  } catch (error) {
-    console.error('Error saving to paywall-sites.js:', error);
+  } catch {
+    USER_SITES.added = USER_SITES.added.filter(d => d !== domain);
+    rebuildDomainList();
     return { success: false, message: `Failed to save ${domain} to the paywall list.` };
   }
 }
 
-// Function to check if a URL belongs to a paywall site
+function removePaywallSite(domain) {
+  domain = domain.toLowerCase().replace(/^www\./, '');
+
+  if (!PAYWALL_DOMAINS.includes(domain)) {
+    return { success: false, message: `Domain ${domain} is not in the paywall list.` };
+  }
+
+  // Remove from user-added if it was user-added
+  const wasUserAdded = USER_SITES.added.includes(domain);
+  if (wasUserAdded) {
+    USER_SITES.added = USER_SITES.added.filter(d => d !== domain);
+  }
+
+  // If it's a built-in domain, add to removed list so it stays removed across restarts
+  if (BUILTIN_DOMAINS.includes(domain) && !USER_SITES.removed.includes(domain)) {
+    USER_SITES.removed.push(domain);
+  }
+
+  try {
+    saveUserSites();
+    rebuildDomainList();
+    return { success: true, message: `Removed ${domain} from the paywall list.` };
+  } catch {
+    // Rollback in-memory changes
+    if (wasUserAdded) USER_SITES.added.push(domain);
+    USER_SITES.removed = USER_SITES.removed.filter(d => d !== domain);
+    rebuildDomainList();
+    return { success: false, message: `Failed to remove ${domain} from the paywall list.` };
+  }
+}
+
 function isPaywallSite(url) {
   try {
     const domain = new URL(url).hostname.replace('www.', '');
@@ -66,63 +153,36 @@ function isPaywallSite(url) {
   }
 }
 
-// Function to convert URL to archive.is or xcancel.com URL
+// Convert Twitter/X URL to xcancel.com equivalent
+function getXcancelUrl(url) {
+  return url.replace(/^https?:\/\/(www\.)?(x\.com|twitter\.com)/, 'https://xcancel.com');
+}
+
+// Check if a URL is a Twitter/X link
+function isTwitterUrl(url) {
+  try {
+    const domain = new URL(url).hostname.replace('www.', '');
+    return domain === 'x.com' || domain === 'twitter.com';
+  } catch {
+    return false;
+  }
+}
+
 function getArchiveUrl(url) {
   try {
-    // Parse the URL
-    const parsedUrl = new URL(url);
-    const domain = parsedUrl.hostname.replace('www.', '');
-
-    // Special handling for x.com and twitter.com
-    if (domain === 'x.com' || domain === 'twitter.com') {
-      // Replace the domain with nitter.poast.org but keep the rest of the path
-      return url.replace(/^https?:\/\/(www\.)?(x\.com|twitter\.com)/, 'https://xcancel.com');
-    }
-
-    // Default handling for other sites using archive.is
     return `https://archive.is/newest/${url}`;
   } catch (e) {
     console.error(`Error parsing URL for archive: ${url}`, e);
-    // Fallback to a basic replacement if parsing fails
     return `https://archive.is/newest/${url}`;
   }
 }
 
-// Function to remove a paywall site
-function removePaywallSite(domain) {
-  // Normalize domain (remove www. prefix if present)
-  domain = domain.toLowerCase().replace(/^www\./, '');
-  
-  // Check if domain is in the user-added list
-  if (!PAYWALL_DOMAINS.includes(domain)) {
-    return { 
-      success: false, 
-      message: `Domain ${domain} is not in the paywall list.` 
-    };
-  }
-  
-  // Remove from the list
-  PAYWALL_DOMAINS = PAYWALL_DOMAINS.filter(site => site !== domain);
-  
-  // Write the entire list back to paywall-sites.js
-  try {
-    const fileContent = `// List of known paywall domains\nmodule.exports = [\n  '${PAYWALL_DOMAINS.sort().join("',\n  '")}'  \n];\n`;
-    fs.writeFileSync(path.join(__dirname, 'paywall-sites.js'), fileContent, 'utf8');
-    return { success: true, message: `Removed ${domain} from the paywall list.` };
-  } catch (error) {
-    console.error('Error saving to paywall-sites.js:', error);
-    return { success: false, message: `Failed to remove ${domain} from the paywall list.` };
-  }
-}
-
-// Add this helper function to send DM responses
 async function sendDirectToUser(username, message) {
   try {
     await driver.sendDirectToUser(message, username);
     console.log(`Sent DM to ${username}`);
   } catch (error) {
     console.error(`Failed to send DM to ${username}:`, error);
-    // Fallback to channel if DM fails
     try {
       await driver.sendToRoom(`@${username} I tried to DM you but couldn't. Please check your DM settings.`, message.rid);
     } catch (secondError) {
@@ -131,177 +191,104 @@ async function sendDirectToUser(username, message) {
   }
 }
 
-// Modify the processMessages function
-async function processMessages(err, message, messageOptions) {
-  if (err) {
-    console.error('Error processing message:', err);
-    return;
-  }
-
-  // Skip messages from the bot itself
-  if (!message.u || message.u.username === USER) {
-    return;
-  }
-
-  // Skip messages we've already processed (add this)
-  if (message._id && PROCESSED_MESSAGE_IDS.has(message._id)) {
-    console.log(`Skipping already processed message: ${message._id}`);
-    return;
-  }
-
-  // Mark this message as processed (add this)
-  if (message._id) {
-    PROCESSED_MESSAGE_IDS.add(message._id);
-    
-    // Keep the set from growing too large by removing old entries
-    // when it exceeds 1000 messages
-    if (PROCESSED_MESSAGE_IDS.size > 1000) {
-      const iterator = PROCESSED_MESSAGE_IDS.values();
-      PROCESSED_MESSAGE_IDS.delete(iterator.next().value);
-    }
-  }
-
-  // Check if this is a command
-  if (message.msg && message.msg.startsWith('!addsite')) {
-    // Extract domain from command
-    const parts = message.msg.split(' ');
-    if (parts.length < 2) {
-      await sendDirectToUser(message.u.username, 'Usage: !addsite domain.com');
-      return;
-    }
-    
-    // Get the domain from the command
-    let domain = parts[1];
-    
-    // If domain includes http:// or https://, extract just the hostname
-    try {
-      if (domain.startsWith('http')) {
-        domain = new URL(domain).hostname;
-      }
-    } catch (e) {
-      console.error(`Error parsing domain URL: ${domain}`, e);
-    }
-    
-    // Add the site
-    const result = addPaywallSite(domain);
-    
-    // Send detailed response via DM
-    await sendDirectToUser(message.u.username, result.message);
-    
-    // Also post the actual result in the channel (not just acknowledgment)
-    await driver.sendToRoom(`${result.message} (requested by @${message.u.username})`, message.rid);
-    return;
-  }
-
-  // Check if this is a remove site command
-  if (message.msg && message.msg.startsWith('!removesite')) {
-    // Extract domain from command
-    const parts = message.msg.split(' ');
-    if (parts.length < 2) {
-      await sendDirectToUser(message.u.username, 'Usage: !removesite domain.com');
-      return;
-    }
-    
-    // Get the domain from the command
-    let domain = parts[1];
-    
-    // If domain includes http:// or https://, extract just the hostname
-    try {
-      if (domain.startsWith('http')) {
-        domain = new URL(domain).hostname;
-      }
-    } catch (e) {
-      console.error(`Error parsing domain URL: ${domain}`, e);
-    }
-    
-    // Remove the site
-    const result = removePaywallSite(domain);
-    
-    // Send detailed response via DM
-    await sendDirectToUser(message.u.username, result.message);
-    
-    // Also post the actual result in the channel
-    await driver.sendToRoom(`${result.message} (requested by @${message.u.username})`, message.rid);
-    return;
-  }
-
-  // Check for !listsites command
-  if (message.msg && message.msg.trim() === '!listsites') {
-    // Create a formatted list of paywall domains
-    const sortedDomains = [...PAYWALL_DOMAINS].sort();
-    const domainList = sortedDomains.join('\n- ');
-    
-    // Send the list via DM only
-    await sendDirectToUser(message.u.username, `Current paywall sites:\n- ${domainList}`);
-    
-    return;
-  }
-
-  // Look for URLs in the message
-  const urls = message.msg.match(urlRegex);
-  if (!urls) {
-    return;
-  }
-
-  // Check if any paywall URLs exist in the message
-  const paywallUrls = urls.filter(url => isPaywallSite(url));
-  
-  if (paywallUrls.length > 0) {
-    // Create a copy of the original message
-    let modifiedMessage = message.msg;
-    let foundPaywall = false;
-    
-    // Replace each paywall URL with its archive equivalent
-    for (const url of paywallUrls) {
-      const archiveUrl = getArchiveUrl(url);
-      modifiedMessage = modifiedMessage.replace(url, archiveUrl);
-      foundPaywall = true;
-      console.log(`Replaced paywall URL: ${url} with: ${archiveUrl}`);
-    }
-    
-    // Only send a response if we found and replaced a paywall URL
-    if (foundPaywall) {
-      // Get the original sender's username
-      const username = message.u.username;
-      
-      // Create a formatted response
-      const response = `@${username} shared: ${modifiedMessage}`;
-      
-      try {
-        await driver.sendToRoom(response, message.rid);
-        console.log(`Sent rewritten message to room ${message.rid}`);
-      } catch (error) {
-        console.error(`Failed to send message to room ${message.rid}:`, error);
-      }
-    }
+function parseDomainArg(input) {
+  try {
+    return input.startsWith('http') ? new URL(input).hostname : input;
+  } catch {
+    return input;
   }
 }
 
-// Start the bot
+async function handleSiteCommand(message, commandName, handler) {
+  const parts = message.msg.split(' ');
+  if (parts.length < 2) {
+    await sendDirectToUser(message.u.username, `Usage: ${commandName} domain.com`);
+    return;
+  }
+  const domain = parseDomainArg(parts[1]);
+  const result = handler(domain);
+  await sendDirectToUser(message.u.username, result.message);
+  await driver.sendToRoom(`${result.message} (requested by @${message.u.username})`, message.rid);
+}
+
+async function processMessages(err, message, messageOptions) {
+  if (err) { console.error('Error processing message:', err); return; }
+  if (!message.u || message.u.username === USER) return;
+
+  if (message._id && PROCESSED_MESSAGE_IDS.has(message._id)) return;
+  if (message._id) {
+    PROCESSED_MESSAGE_IDS.add(message._id);
+    if (PROCESSED_MESSAGE_IDS.size > 1000) {
+      PROCESSED_MESSAGE_IDS.delete(PROCESSED_MESSAGE_IDS.values().next().value);
+    }
+  }
+
+  if (message.msg?.startsWith('!addsite')) {
+    return handleSiteCommand(message, '!addsite', addPaywallSite);
+  }
+  if (message.msg?.startsWith('!removesite')) {
+    return handleSiteCommand(message, '!removesite', removePaywallSite);
+  }
+  if (message.msg?.trim() === '!listsites') {
+    const list = [...PAYWALL_DOMAINS].sort().join('\n- ');
+    await sendDirectToUser(message.u.username, `Current paywall sites:\n- ${list}`);
+    return;
+  }
+
+  const urls = message.msg.match(urlRegex);
+  if (!urls) return;
+
+  let modifiedMessage = message.msg;
+  let hasReplacements = false;
+
+  // Twitter/X links → xcancel (independent of paywall list)
+  for (const url of urls) {
+    if (isTwitterUrl(url)) {
+      const xcancelUrl = getXcancelUrl(url);
+      modifiedMessage = modifiedMessage.replace(url, xcancelUrl);
+      console.log(`Replaced Twitter/X URL: ${url} with: ${xcancelUrl}`);
+      hasReplacements = true;
+    }
+  }
+
+  // Paywall links → archive.is (skip any already handled as Twitter/X)
+  const paywallUrls = urls.filter(url => isPaywallSite(url) && !isTwitterUrl(url));
+  for (const url of paywallUrls) {
+    const archiveUrl = getArchiveUrl(url);
+    modifiedMessage = modifiedMessage.replace(url, archiveUrl);
+    console.log(`Replaced paywall URL: ${url} with: ${archiveUrl}`);
+    hasReplacements = true;
+  }
+
+  if (!hasReplacements) return;
+
+  try {
+    await driver.sendToRoom(`@${message.u.username} shared: ${modifiedMessage}`, message.rid);
+    console.log(`Sent rewritten message to room ${message.rid}`);
+  } catch (error) {
+    console.error(`Failed to send message to room ${message.rid}:`, error);
+  }
+}
+
 async function runBot() {
   console.log('Starting Paywall Bot...');
   console.log('Attempting to connect to', HOST);
-  
+
   try {
-    // Connect to Rocket.Chat server
     await driver.connect(CONNECTION_OPTIONS);
     console.log('Connected to Rocket.Chat server');
-    
-    // Login
+
     await driver.login({ username: USER, password: PASS });
     console.log('Bot logged in successfully');
-    
-    // Subscribe to rooms
+
     const subscribed = await driver.subscribeToMessages();
     console.log('Bot subscribed to messages');
-    
-    // Join rooms
+
     for (const room of ROOMS) {
       await driver.joinRoom(room.trim());
       console.log(`Bot joined room: ${room}`);
     }
-    
-    // Listen for messages
+
     driver.reactToMessages(processMessages);
     console.log('Bot is listening for messages with URLs');
   } catch (error) {
@@ -310,7 +297,6 @@ async function runBot() {
   }
 }
 
-// Handle process termination
 function handleExit() {
   console.log('Disconnecting bot...');
   driver.disconnect();
@@ -320,8 +306,7 @@ function handleExit() {
 process.on('SIGINT', handleExit);
 process.on('SIGTERM', handleExit);
 
-// Run the bot
 runBot().catch(err => {
   console.error('Error running bot:', err);
   process.exit(1);
-}); 
+});

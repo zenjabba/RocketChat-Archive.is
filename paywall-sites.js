@@ -19,5 +19,5 @@ module.exports = [
   'thetimes.co.uk',
   'washingtonpost.com',
   'wired.com',
-  'wsj.com'  
+  'wsj.com'
 ];

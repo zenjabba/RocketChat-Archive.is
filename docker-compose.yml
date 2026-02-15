@@ -11,12 +11,9 @@ services:
       - rocketchat_password
     restart: unless-stopped
     volumes:
-      - paywall-data:/usr/src/app/data
+      - ./data:/usr/src/app/data
     command: /bin/sh -c "export ROCKETCHAT_PASSWORD=$$(cat /run/secrets/rocketchat_password) && node paywallbot.js"
 
 secrets:
   rocketchat_password:
     file: ./rocketchat_password.secret
-
-volumes:
-  paywall-data:
