@@ -169,12 +169,7 @@ function isTwitterUrl(url) {
 }
 
 function getArchiveUrl(url) {
-  try {
-    return `https://archive.is/newest/${url}`;
-  } catch (e) {
-    console.error(`Error parsing URL for archive: ${url}`, e);
-    return `https://archive.is/newest/${url}`;
-  }
+  return `https://removepaywalls.com/${url}`;
 }
 
 async function sendDirectToUser(username, message) {

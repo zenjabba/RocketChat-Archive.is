@@ -1,12 +1,12 @@
 # RocketChat Paywall URL Rewriter Bot
 
-A RocketChat bot that automatically detects links to paywall sites and provides archive.is alternatives.
+A RocketChat bot that automatically detects links to paywall sites and provides removepaywalls.com alternatives.
 
 ## Features
 
 - Monitors channels for messages containing URLs
 - Identifies URLs from known paywall sites
-- Provides archive.is links as alternatives
+- Provides removepaywalls.com links as alternatives
 - Allows adding/removing sites via commands
 - Easily configurable
 
